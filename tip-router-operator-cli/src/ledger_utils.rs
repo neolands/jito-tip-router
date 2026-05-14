@@ -61,6 +61,42 @@ pub enum LedgerUtilsError {
     BankSlotMismatch { expected: u64, found: u64 },
 }
 
+/// Open the blockstore in `original_access_type`. If the open fails because of
+/// a missing column family — which secondary/ReadOnly mode cannot create —
+/// briefly reopen in `PrimaryForMaintenance` so RocksDB persists the missing
+/// CFs, then retry the original open.
+fn open_blockstore_creating_missing_columns(
+    ledger_path: &Path,
+    original_access_type: AccessType,
+) -> Result<Blockstore, BlockstoreError> {
+    let open = |access_type: AccessType| {
+        Blockstore::open_with_options(
+            ledger_path,
+            BlockstoreOptions {
+                access_type,
+                ..BlockstoreOptions::default()
+            },
+        )
+    };
+    match open(original_access_type.clone()) {
+        Ok(blockstore) => Ok(blockstore),
+        Err(BlockstoreError::RocksDb(err))
+            if err
+                .to_string()
+                .starts_with("Invalid argument: Column family not found:") =>
+        {
+            warn!(
+                "Blockstore at {:?} is missing a column family; reopening in \
+                 PrimaryForMaintenance to create it: {}",
+                ledger_path, err
+            );
+            let _ = open(AccessType::PrimaryForMaintenance)?;
+            open(original_access_type)
+        }
+        Err(err) => Err(err),
+    }
+}
+
 /// Create the Bank for a desired slot for given file paths.
 #[allow(clippy::cognitive_complexity, clippy::too_many_arguments)]
 pub fn get_bank_from_ledger(
@@ -128,13 +164,7 @@ pub fn get_bank_from_ledger(
 
     let access_type = AccessType::ReadOnly;
     // Error handling is a modified copy pasta from ledger utils
-    let blockstore = match Blockstore::open_with_options(
-        ledger_path,
-        BlockstoreOptions {
-            access_type: access_type.clone(),
-            ..BlockstoreOptions::default()
-        },
-    ) {
+    let blockstore = match open_blockstore_creating_missing_columns(ledger_path, access_type.clone()) {
         Ok(blockstore) => blockstore,
         Err(BlockstoreError::RocksDb(err)) => {
             // Missing essential file, indicative of blockstore not existing
